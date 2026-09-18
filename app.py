@@ -1,73 +1,52 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
-import cloudscraper
+import requests
 from bs4 import BeautifulSoup
 import re
 
 app = Flask(__name__)
 CORS(app)
 
-def get_scraper():
-    return cloudscraper.create_scraper(
-        browser={'browser': 'firefox', 'platform': 'windows', 'desktop': True}
-    )
-
-def get_headers():
-    return {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0",
-        "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Connection": "keep-alive"
-    }
-
 @app.route('/')
 def index():
-    return jsonify({"status": "CStream API Running", "message": "Multi-Domain Scraper Active!"})
+    return jsonify({"status": "CStream API Running", "message": "Mode Proxy Gateway Aktif!"})
 
 @app.route('/api/home')
 def get_home():
-    scraper = get_scraper()
-    headers = get_headers()
+    target_url = "https://z2.idlixku.com/"
     
-    # Daftar domain alternatif IDLIX untuk dicoba jika yang utama 403
-    target_urls = [
-        "https://z2.idlixku.com/",
-        "https://idlix.lock/0/",
-        "https://149.18.68.27/" # IP langsung jika ada
-    ]
+    # Menggunakan Proxy Gateway publik untuk melompati blokir IP Datacenter Railway
+    proxy_url = f"https://corsproxy.io/?{target_url}"
     
-    html_content = None
-    success_url = ""
-
-    for url in target_urls:
-        try:
-            print(f"[*] Mencoba mengakses: {url}")
-            headers["Referer"] = url
-            res = scraper.get(url, headers=headers, timeout=10)
-            print(f"[*] Status HTTP dari {url}: {res.status_code}")
-            
-            if res.status_code == 200:
-                html_content = res.text
-                success_url = url
-                break
-        except Exception as e:
-            print(f"[X] Gagal pada {url}: {str(e)}")
-            continue
-
-    if not html_content:
-        return jsonify({
-            "error": "Semua domain IDLIX diblokir (403) di server Railway.",
-            "hero": [], "trending": [], "kdrama": [], "movies": []
-        }), 200
-
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
     try:
-        soup = BeautifulSoup(html_content, 'html.parser')
+        print(f"[*] Mengambil data IDLIX melalui Proxy Gateway...")
+        res = requests.get(proxy_url, headers=headers, timeout=15)
+        print(f"[*] Status HTTP Gateway: {res.status_code}")
+        
+        # Jika gateway pertama gagal, coba gateway alternatif (AllOrigins)
+        if res.status_code != 200:
+            alt_proxy = f"https://api.allorigins.win/raw?url={target_url}"
+            res = requests.get(alt_proxy, headers=headers, timeout=15)
+            print(f"[*] Status HTTP Alt Gateway: {res.status_code}")
+            
+        if res.status_code != 200:
+            return jsonify({
+                "error": f"Gateway menolak dengan status {res.status_code}",
+                "hero": [], "trending": [], "kdrama": [], "movies": []
+            }), 200
+
+        soup = BeautifulSoup(res.text, 'html.parser')
+        
         hero, trending, kdrama, movies = [], [], [], []
         items = soup.find_all('article')
         if not items:
             items = soup.find_all('div', class_=re.compile('item|box', re.I))
 
-        print(f"[*] Berhasil parsing dari {success_url}. Total elemen: {len(items)}")
+        print(f"[*] Total elemen berhasil ditemukan: {len(items)}")
 
         for item in items:
             try:
@@ -133,6 +112,7 @@ def get_home():
         })
         
     except Exception as e:
+        print(f"[X] Error Critical: {str(e)}")
         return jsonify({
             "error": str(e),
             "hero": [], "trending": [], "kdrama": [], "movies": []
