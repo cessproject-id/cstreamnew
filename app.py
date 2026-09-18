@@ -7,7 +7,6 @@ import re
 app = Flask(__name__)
 CORS(app)
 
-# Mengikuti pola dari server.py lu untuk tembus Cloudflare
 def get_scraper():
     return cloudscraper.create_scraper(
         browser={'browser': 'firefox', 'platform': 'windows', 'desktop': True}
@@ -18,40 +17,57 @@ def get_headers():
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0",
         "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Referer": "https://z2.idlixku.com/"
+        "Connection": "keep-alive"
     }
 
 @app.route('/')
 def index():
-    return jsonify({"status": "CStream API Running", "message": "Sinkronisasi pola server.py berhasil!"})
+    return jsonify({"status": "CStream API Running", "message": "Multi-Domain Scraper Active!"})
 
 @app.route('/api/home')
 def get_home():
-    target_url = "https://z2.idlixku.com/"
     scraper = get_scraper()
     headers = get_headers()
     
-    try:
-        print(f"[*] Menghubungi IDLIX dengan pola Firefox Desktop...")
-        res = scraper.get(target_url, headers=headers, timeout=15)
-        
-        print(f"[*] Status HTTP: {res.status_code}")
-        
-        # Jika masih terblokir, kembalikan struktur kosong agar frontend tidak crash
-        if res.status_code != 200:
-            return jsonify({
-                "error": f"IDLIX merespon dengan status {res.status_code}",
-                "hero": [], "trending": [], "kdrama": [], "movies": []
-            }), 200
+    # Daftar domain alternatif IDLIX untuk dicoba jika yang utama 403
+    target_urls = [
+        "https://z2.idlixku.com/",
+        "https://idlix.lock/0/",
+        "https://149.18.68.27/" # IP langsung jika ada
+    ]
+    
+    html_content = None
+    success_url = ""
 
-        soup = BeautifulSoup(res.text, 'html.parser')
-        
+    for url in target_urls:
+        try:
+            print(f"[*] Mencoba mengakses: {url}")
+            headers["Referer"] = url
+            res = scraper.get(url, headers=headers, timeout=10)
+            print(f"[*] Status HTTP dari {url}: {res.status_code}")
+            
+            if res.status_code == 200:
+                html_content = res.text
+                success_url = url
+                break
+        except Exception as e:
+            print(f"[X] Gagal pada {url}: {str(e)}")
+            continue
+
+    if not html_content:
+        return jsonify({
+            "error": "Semua domain IDLIX diblokir (403) di server Railway.",
+            "hero": [], "trending": [], "kdrama": [], "movies": []
+        }), 200
+
+    try:
+        soup = BeautifulSoup(html_content, 'html.parser')
         hero, trending, kdrama, movies = [], [], [], []
         items = soup.find_all('article')
         if not items:
             items = soup.find_all('div', class_=re.compile('item|box', re.I))
 
-        print(f"[*] Total elemen ditemukan: {len(items)}")
+        print(f"[*] Berhasil parsing dari {success_url}. Total elemen: {len(items)}")
 
         for item in items:
             try:
@@ -117,7 +133,6 @@ def get_home():
         })
         
     except Exception as e:
-        print(f"[X] Error: {str(e)}")
         return jsonify({
             "error": str(e),
             "hero": [], "trending": [], "kdrama": [], "movies": []
